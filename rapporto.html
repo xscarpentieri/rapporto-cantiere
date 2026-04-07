@@ -973,7 +973,14 @@ function setupUser() {
 // ===================== INIT =====================
 window.onload = function() {
   // Init EmailJS
-  if (window.emailjs) emailjs.init(EMAILJS_PUBLIC_KEY);
+  function initEmailJS() {
+    if (window.emailjs) {
+      emailjs.init(EMAILJS_PUBLIC_KEY);
+    } else {
+      setTimeout(initEmailJS, 500);
+    }
+  }
+  initEmailJS();
   // Attach button
   const btn = document.getElementById('setupBtn');
   if (btn) btn.onclick = setupUser;
@@ -1181,7 +1188,9 @@ function salvaRapporto() {
 }
 
 function inviaEmail(data) {
-  if (!window.emailjs) return;
+  if (!window.emailjs) { console.error('EmailJS not loaded'); return; }
+  // Garantia de inicialização
+  try { emailjs.init(EMAILJS_PUBLIC_KEY); } catch(e) {}
 
   const azienda = (data.personaleAzienda||[]).map(p => p.nome).filter(Boolean).join(', ') || '—';
   const esterno = (data.personaleEsterno||[]).map(p => p.nome).filter(Boolean).join(', ') || '—';
