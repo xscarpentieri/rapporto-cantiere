@@ -1219,7 +1219,7 @@ function inviaEmail(data) {
   const matOrdinare = (data.materialiOrdinare||[]).map(m => `${m.desc}${m.qta?' ('+m.qta+')':''}`).join(', ') || '—';
 
   const params = {
-    to_email: DESTINATARIO_EMAIL,
+    to_email: DESTINATARIO_EMAIL + ', ' + DESTINATARIO_EMAIL2,
     dipendente: data.dipendente,
     data: data.data,
     cantiere: data.cantiere || '—',
@@ -1242,10 +1242,6 @@ function inviaEmail(data) {
   };
 
   emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params)
-    .then(() => {
-      const params2 = { ...params, to_email: DESTINATARIO_EMAIL2 };
-      return emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params2);
-    })
     .then(() => showToast('📧 Email inviato!'))
     .catch(err => {
       console.error('EmailJS error:', err);
