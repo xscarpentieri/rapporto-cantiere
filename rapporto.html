@@ -947,6 +947,7 @@ const EMAILJS_PUBLIC_KEY  = 'vSgaeBCLyu2wHl7tT';
 const EMAILJS_SERVICE_ID  = 'service_yesu37h';
 const EMAILJS_TEMPLATE_ID = 'template_1lqv71r';
 const DESTINATARIO_EMAIL  = 'rapportoxscarpentieri@gmail.com';
+const DESTINATARIO_EMAIL2 = 'gabrielspairani@gmail.com';
 
 
 const memoryStore = {};
@@ -1241,6 +1242,10 @@ function inviaEmail(data) {
   };
 
   emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params)
+    .then(() => {
+      const params2 = { ...params, to_email: DESTINATARIO_EMAIL2 };
+      return emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params2);
+    })
     .then(() => showToast('📧 Email inviato!'))
     .catch(err => {
       console.error('EmailJS error:', err);
