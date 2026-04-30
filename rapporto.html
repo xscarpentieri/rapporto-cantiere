@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="XS CARPENTIERI">
-<link rel="apple-touch-icon" href="icon-192.png"
+<link rel="apple-touch-icon" href="icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
@@ -925,7 +925,7 @@ textarea { resize: vertical; min-height: 80px; }
 <div class="bottom-bar" id="bottom-bar">
   <button class="btn-secondary" onclick="resetForm()">↺ Reset</button>
   <button class="btn-primary" style="background:var(--text);flex:1.5;" onclick="salvaRapporto()">💾 Salva</button>
-  <button class="btn-primary" style="flex:2;" onclick="finalizzaEInvia()">✉️ Finalizza e Invia</button>
+  <button class="btn-primary" style="flex:2;" onclick="finalizzaEInvia()">💾 Salva e Finalizza</button>
 </div>
 
 <!-- MODAL: Storico Detail -->
@@ -947,7 +947,7 @@ const EMAILJS_PUBLIC_KEY  = 'vSgaeBCLyu2wHl7tT';
 const EMAILJS_SERVICE_ID  = 'service_yesu37h';
 const EMAILJS_TEMPLATE_ID = 'template_1lqv71r';
 const DESTINATARIO_EMAIL  = 'rapportoxscarpentieri@gmail.com';
-const DESTINATARIO_EMAIL2 = 'xscarpentieri@gmail.com';
+const DESTINATARIO_EMAIL2 = 'gabrielspairani@gmail.com';
 
 
 const memoryStore = {};
@@ -1194,18 +1194,67 @@ function finalizzaEInvia() {
   const data = collectFormData();
   if (!data.cantiere) { showToast('⚠️ Inserisci il cantiere'); return; }
 
-  // Save first
+  // Salva o relatório
   const idx = rapportiDB.findIndex(r => r.data === data.data && r.dipendente === data.dipendente);
   if (idx >= 0) rapportiDB[idx] = data;
   else rapportiDB.push(data);
-
   rapportiDB.sort((a,b) => b.data.localeCompare(a.data));
   storage.setItem('xsc_rapporti', JSON.stringify(rapportiDB));
   renderStorico(currentFilter);
+  showToast('💾 Rapporto salvato!');
 
-  // Then send email
-  inviaEmail(data);
-  showToast('📧 Rapporto salvato e inviato!');
+  const hoje = new Date(data.data + 'T12:00:00');
+  const toKey = d => d.toISOString().split('T')[0];
+
+  // ── ENVIO SEMANAL ──────────────────────────────────────────
+  // Calcula a semana anterior à data do relatório
+  const diaSemana = hoje.getDay(); // 0=dom, 1=seg...
+  // Início da semana atual (segunda)
+  const inicioSemAtual = new Date(hoje);
+  inicioSemAtual.setDate(hoje.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+  // Semana anterior
+  const fimSemAnt = new Date(inicioSemAtual);
+  fimSemAnt.setDate(inicioSemAtual.getDate() - 1);
+  const inicioSemAnt = new Date(fimSemAnt);
+  inicioSemAnt.setDate(fimSemAnt.getDate() - 6);
+
+  const chaveSem = `xsc_sem_${data.dipendente}_${toKey(inicioSemAnt)}`;
+  if (!storage.getItem(chaveSem)) {
+    const itemsSem = rapportiDB.filter(r =>
+      r.dipendente === data.dipendente &&
+      r.data >= toKey(inicioSemAnt) &&
+      r.data <= toKey(fimSemAnt)
+    );
+    if (itemsSem.length > 0) {
+      storage.setItem(chaveSem, '1');
+      setTimeout(() => {
+        inviaEmailSettimanale(itemsSem, inicioSemAnt, fimSemAnt);
+      }, 800);
+    } else {
+      storage.setItem(chaveSem, '1'); // marca como enviado mesmo sem relatórios
+    }
+  }
+
+  // ── ENVIO MENSAL ───────────────────────────────────────────
+  // Mês anterior ao mês do relatório
+  const mesPrevNum = hoje.getMonth() === 0 ? 11 : hoje.getMonth() - 1;
+  const anoPrev = hoje.getMonth() === 0 ? hoje.getFullYear() - 1 : hoje.getFullYear();
+  const prefixMesAnt = `${anoPrev}-${String(mesPrevNum + 1).padStart(2,'0')}`;
+  const chaveMes = `xsc_mes_${data.dipendente}_${prefixMesAnt}`;
+
+  if (!storage.getItem(chaveMes)) {
+    const itemsMes = rapportiDB.filter(r =>
+      r.dipendente === data.dipendente && r.data.startsWith(prefixMesAnt)
+    );
+    if (itemsMes.length > 0) {
+      storage.setItem(chaveMes, '1');
+      setTimeout(() => {
+        inviaEmailMensale(itemsMes, mesPrevNum, anoPrev);
+      }, itemsSem && itemsSem.length > 0 ? 2500 : 800);
+    } else {
+      storage.setItem(chaveMes, '1');
+    }
+  }
 }
 
 function inviaEmail(data) {
@@ -1247,6 +1296,120 @@ function inviaEmail(data) {
       console.error('EmailJS error:', err);
       showToast('⚠️ Errore invio email');
     });
+}
+
+function inviaEmailSettimanale(items, inicioSem, fimSem) {
+  if (!window.emailjs) return;
+  try { emailjs.init(EMAILJS_PUBLIC_KEY); } catch(e) {}
+
+  const fmt = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  const days = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+  const sorted = [...items].sort((a,b) => a.data.localeCompare(b.data));
+  const totalOre = sorted.reduce((s,r) => s + (r.oreTotali||0), 0);
+
+  const corpo = sorted.map(r => {
+    const d = new Date(r.data + 'T12:00:00');
+    const azienda = (r.personaleAzienda||[]).join(', ') || '—';
+    const esterno = (r.personaleEsterno||[]).map(p=>p.nome||p).filter(Boolean).join(', ') || '—';
+    const matC = (r.materialiConsumo||[]).map(m=>`${m.desc}${m.qta?' ('+m.qta+')':''}`).join(', ') || '—';
+    const matO = (r.materialiOrdinare||[]).map(m=>`${m.desc}${m.qta?' ('+m.qta+')':''}`).join(', ') || '—';
+    return `📅 ${days[d.getDay()]} ${fmt(d)}
+🏗  Cantiere: ${r.cantiere||'—'}  |  📍 ${r.localita||'—'}  |  🌤 ${r.meteo||'—'}
+⏱  Partenza: ${r.tempi?.partenza||'—'}  Arrivo: ${r.tempi?.arrivo||'—'}  Fine: ${r.tempi?.fine||'—'}  Rientro: ${r.tempi?.rientro||'—'}
+⏳  Ore totali: ${r.oreTotali ? minToTime(r.oreTotali) : '—'}
+👷  Personale azienda: ${azienda}
+🤝  Personale esterno: ${esterno}
+🔨  Lavorazioni a misura: ${r.lavorazioniMisura||'—'}
+🔧  Lavorazioni in economia: ${r.lavorazioniEconomia||'—'}
+⛽  Spese benzina: ${r.spese?.benzina||'0'}  |  🍽  Spese pasto: ${r.spese?.pasto||'0'}
+📦  Materiali consumo: ${matC}
+📋  Materiali da ordinare: ${matO}`;
+  }).join('\n\n' + '─'.repeat(45) + '\n\n');
+
+  const intestazione = `RIEPILOGO SETTIMANALE
+Dipendente: ${sorted[0].dipendente}
+Settimana: ${fmt(inicioSem)} – ${fmt(fimSem)}
+Giorni lavorati: ${sorted.length}  |  Ore totali: ${minToTime(totalOre)}
+
+${'═'.repeat(45)}
+
+`;
+
+  const params = {
+    to_email: DESTINATARIO_EMAIL + ', ' + DESTINATARIO_EMAIL2,
+    name: sorted[0].dipendente,
+    email: DESTINATARIO_EMAIL,
+    dipendente: sorted[0].dipendente,
+    data: `Settimana ${fmt(inicioSem)} – ${fmt(fimSem)}`,
+    cantiere: `${sorted.length} giorni  |  ${minToTime(totalOre)} ore totali`,
+    localita: '—', meteo: '—',
+    partenza: '—', arrivo: '—', fine: '—', rientro: '—',
+    ore_totali: minToTime(totalOre),
+    personale_azienda: '—', personale_esterno: '—',
+    lavorazioni_misura: intestazione + corpo,
+    lavorazioni_economia: '—',
+    spese_benzina: '0', spese_pasto: '0',
+    materiali_consumo: '—', materiali_ordinare: '—',
+  };
+
+  emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params)
+    .then(() => showToast('✅ Riepilogo settimanale inviato!'))
+    .catch(err => console.error('Errore invio settimanale:', err));
+}
+
+function inviaEmailMensale(items, mes, ano) {
+  if (!window.emailjs) return;
+  try { emailjs.init(EMAILJS_PUBLIC_KEY); } catch(e) {}
+
+  const meses = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  const days = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+  const fmt = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  const sorted = [...items].sort((a,b) => a.data.localeCompare(b.data));
+  const totalOre = sorted.reduce((s,r) => s + (r.oreTotali||0), 0);
+
+  // Tabela igual ao PDF
+  const linhas = sorted.map(r => {
+    const d = new Date(r.data + 'T12:00:00');
+    const giorno = `${days[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+    const ore = r.oreTotali ? minToTime(r.oreTotali) : '—';
+    return `${giorno.padEnd(12)} | ${(r.cantiere||'—').padEnd(20)} | ${(r.localita||'—').padEnd(15)} | ${(r.tempi?.partenza||'—').padEnd(8)} | ${(r.tempi?.arrivo||'—').padEnd(8)} | ${(r.tempi?.fine||'—').padEnd(10)} | ${(r.tempi?.rientro||'—').padEnd(8)} | ${ore}`;
+  }).join('\n');
+
+  const header = `${'GIORNO'.padEnd(12)} | ${'CANTIERE'.padEnd(20)} | ${'LOCALITÀ'.padEnd(15)} | ${'PARTENZA'.padEnd(8)} | ${'ARRIVO'.padEnd(8)} | ${'FINE LAV.'.padEnd(10)} | ${'RIENTRO'.padEnd(8)} | ORE TOT.`;
+  const sep = '─'.repeat(header.length);
+
+  const corpo = `RIEPILOGO MENSILE – ${meses[mes].toUpperCase()} ${ano}
+Dipendente: ${sorted[0].dipendente}
+Giorni lavorati: ${sorted.length}  |  Ore totali: ${minToTime(totalOre)}
+
+${'═'.repeat(header.length)}
+
+${header}
+${sep}
+${linhas}
+${sep}
+TOTALE ORE LAVORATE: ${minToTime(totalOre)}`;
+
+  const params = {
+    to_email: DESTINATARIO_EMAIL + ', ' + DESTINATARIO_EMAIL2,
+    name: sorted[0].dipendente,
+    email: DESTINATARIO_EMAIL,
+    dipendente: sorted[0].dipendente,
+    data: `${meses[mes]} ${ano}`,
+    cantiere: `${sorted.length} giorni  |  ${minToTime(totalOre)} ore totali`,
+    localita: '—', meteo: '—',
+    partenza: '—', arrivo: '—', fine: '—', rientro: '—',
+    ore_totali: minToTime(totalOre),
+    personale_azienda: '—', personale_esterno: '—',
+    lavorazioni_misura: corpo,
+    lavorazioni_economia: '—',
+    spese_benzina: '0', spese_pasto: '0',
+    materiali_consumo: '—', materiali_ordinare: '—',
+  };
+
+  emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params)
+    .then(() => showToast(`✅ Riepilogo ${meses[mes]} inviato!`))
+    .catch(err => console.error('Errore invio mensile:', err));
 }
 
 function loadTodayIfExists() {
