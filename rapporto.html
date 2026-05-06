@@ -860,6 +860,17 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-header" style="background:var(--accent)">📷 Foto del Giorno</div>
+    <div class="section-body">
+      <div id="foto-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
+      <label style="display:flex;align-items:center;justify-content:center;gap:8px;background:var(--surface2);border:2px dashed var(--accent);border-radius:10px;padding:14px;cursor:pointer;font-size:14px;color:var(--accent);font-weight:600;">
+        📷 Aggiungi Foto
+        <input type="file" id="foto-input" accept="image/*" multiple capture="environment" style="display:none" onchange="handleFotoInput(this)">
+      </label>
+    </div>
+  </div>
+
   <div style="height:70px"></div>
 </div>
 
@@ -1171,7 +1182,8 @@ function collectFormData() {
     spese: {
       benzina: document.getElementById('spese-benzina').value.trim(),
       pasto: document.getElementById('spese-pasto').value.trim(),
-    }
+    },
+    foto: window._fotoAtual || [],
   };
 }
 
@@ -1460,6 +1472,10 @@ function fillForm(r) {
 
   if (r.materialiConsumo?.length) fillMateriali('materiali-consumo', r.materialiConsumo, 'consumo');
   if (r.materialiOrdinare?.length) fillMateriali('materiali-ordinare', r.materialiOrdinare, 'ordinare');
+
+  // Carregar fotos
+  window._fotoAtual = (r.foto && r.foto.length) ? [...r.foto] : [];
+  renderFotoPreview();
 }
 
 function resetForm() {
@@ -1477,6 +1493,8 @@ function resetForm() {
   addMateriale('consumo'); addMateriale('ordinare');
   computeOre();
   document.querySelectorAll('.meteo-btn').forEach(b => b.classList.remove('active'));
+  window._fotoAtual = [];
+  renderFotoPreview();
   showToast('Modulo resettato');
 }
 
@@ -1617,6 +1635,44 @@ function closeModalDirect() {
 }
 
 // ===================== PDF GENERATION =====================
+// ===================== FOTO =====================
+window._fotoAtual = [];
+
+function handleFotoInput(input) {
+  const files = Array.from(input.files);
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      window._fotoAtual.push(e.target.result);
+      renderFotoPreview();
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value = '';
+}
+
+function renderFotoPreview() {
+  const container = document.getElementById('foto-preview');
+  if (!container) return;
+  container.innerHTML = window._fotoAtual.map((src, i) => `
+    <div style="position:relative;width:80px;height:80px;">
+      <img src="${src}" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:2px solid var(--accent);">
+      <button onclick="removeFoto(${i})" style="position:absolute;top:-6px;right:-6px;background:#C0392B;color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;line-height:1;">✕</button>
+    </div>
+  `).join('');
+}
+
+function removeFoto(i) {
+  window._fotoAtual.splice(i, 1);
+  renderFotoPreview();
+}
+
+function loadFotoForDate(dataKey) {
+  const r = rapportiDB.find(x => x.data === dataKey && x.dipendente === currentUser);
+  window._fotoAtual = (r && r.foto) ? [...r.foto] : [];
+  renderFotoPreview();
+}
+
 function buildRapportoPDF(doc, r, yStart) {
   let y = yStart || 20;
   const lm = 15, pw = 180;
@@ -1837,6 +1893,33 @@ function buildRapportoPDF(doc, r, yStart) {
       doc.text(m.qta, lm+pw-18, y+4);
     }
     y += 6;
+  }
+
+  // Fotos
+  if (r.foto && r.foto.length > 0) {
+    y += 4;
+    doc.setFillColor(30,24,21);
+    doc.rect(lm, y, pw, 7, 'F');
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(6.5); doc.setFont('helvetica','bold');
+    doc.text('FOTO DEL GIORNO', lm+3, y+4.5);
+    doc.setTextColor(30,24,21);
+    y += 9;
+
+    const fotoW = 55, fotoH = 42, gap = 5;
+    let fx = lm;
+    for (let i = 0; i < r.foto.length; i++) {
+      try {
+        if (fx + fotoW > lm + pw) {
+          fx = lm;
+          y += fotoH + gap;
+        }
+        if (y + fotoH > 280) { doc.addPage(); y = 15; fx = lm; }
+        doc.addImage(r.foto[i], 'JPEG', fx, y, fotoW, fotoH);
+        fx += fotoW + gap;
+      } catch(e) {}
+    }
+    y += fotoH + gap;
   }
 
   return y;
