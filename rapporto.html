@@ -1474,7 +1474,7 @@ function fillForm(r) {
   if (r.materialiOrdinare?.length) fillMateriali('materiali-ordinare', r.materialiOrdinare, 'ordinare');
 
   // Carregar fotos
-  window._fotoAtual = (r.foto && r.foto.length) ? [...r.foto] : [];
+  window._fotoAtual = loadFotos(r.data);
   renderFotoPreview();
 }
 
@@ -1638,13 +1638,65 @@ function closeModalDirect() {
 // ===================== FOTO =====================
 window._fotoAtual = [];
 
+function fotoKey(dataKey, i) {
+  return `xsc_foto_${currentUser}_${dataKey}_${i}`;
+}
+
+function saveFotos(dataKey) {
+  // Limpa fotos antigas desta data
+  for (let i = 0; i < 20; i++) {
+    storage.removeItem(fotoKey(dataKey, i));
+  }
+  // Guarda cada foto numa chave separada
+  window._fotoAtual.forEach((base64, i) => {
+    try {
+      storage.setItem(fotoKey(dataKey, i), base64);
+    } catch(e) {
+      showToast('⚠️ Spazio esaurito, alcune foto non salvate');
+    }
+  });
+  // Guarda o total de fotos no relatório (só o número, não o base64)
+  const idx = rapportiDB.findIndex(r => r.data === dataKey && r.dipendente === currentUser);
+  if (idx >= 0) {
+    rapportiDB[idx].fotoCount = window._fotoAtual.length;
+    rapportiDB[idx].foto = []; // não guarda base64 no relatório
+    storage.setItem('xsc_rapporti', JSON.stringify(rapportiDB));
+  }
+}
+
+function loadFotos(dataKey) {
+  const fotos = [];
+  for (let i = 0; i < 20; i++) {
+    const f = storage.getItem(fotoKey(dataKey, i));
+    if (f) fotos.push(f);
+    else break;
+  }
+  return fotos;
+}
+
 function handleFotoInput(input) {
   const files = Array.from(input.files);
+  const dataKey = document.getElementById('rapporto-data').value || todayKey();
   files.forEach(file => {
     const reader = new FileReader();
     reader.onload = e => {
-      window._fotoAtual.push(e.target.result);
-      renderFotoPreview();
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxSize = 1200;
+        let w = img.width, h = img.height;
+        if (w > maxSize || h > maxSize) {
+          if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+          else { w = Math.round(w * maxSize / h); h = maxSize; }
+        }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL('image/jpeg', 0.75);
+        window._fotoAtual.push(compressed);
+        renderFotoPreview();
+        saveFotos(dataKey);
+      };
+      img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   });
@@ -1663,13 +1715,14 @@ function renderFotoPreview() {
 }
 
 function removeFoto(i) {
+  const dataKey = document.getElementById('rapporto-data').value || todayKey();
   window._fotoAtual.splice(i, 1);
   renderFotoPreview();
+  saveFotos(dataKey);
 }
 
 function loadFotoForDate(dataKey) {
-  const r = rapportiDB.find(x => x.data === dataKey && x.dipendente === currentUser);
-  window._fotoAtual = (r && r.foto) ? [...r.foto] : [];
+  window._fotoAtual = loadFotos(dataKey);
   renderFotoPreview();
 }
 
@@ -1896,7 +1949,8 @@ function buildRapportoPDF(doc, r, yStart) {
   }
 
   // Fotos
-  if (r.foto && r.foto.length > 0) {
+  const fotos = loadFotos(r.data);
+  if (fotos.length > 0) {
     y += 4;
     doc.setFillColor(30,24,21);
     doc.rect(lm, y, pw, 7, 'F');
@@ -1908,14 +1962,11 @@ function buildRapportoPDF(doc, r, yStart) {
 
     const fotoW = 55, fotoH = 42, gap = 5;
     let fx = lm;
-    for (let i = 0; i < r.foto.length; i++) {
+    for (let i = 0; i < fotos.length; i++) {
       try {
-        if (fx + fotoW > lm + pw) {
-          fx = lm;
-          y += fotoH + gap;
-        }
+        if (fx + fotoW > lm + pw) { fx = lm; y += fotoH + gap; }
         if (y + fotoH > 280) { doc.addPage(); y = 15; fx = lm; }
-        doc.addImage(r.foto[i], 'JPEG', fx, y, fotoW, fotoH);
+        doc.addImage(fotos[i], 'JPEG', fx, y, fotoW, fotoH);
         fx += fotoW + gap;
       } catch(e) {}
     }
