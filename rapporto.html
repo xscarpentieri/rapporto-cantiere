@@ -1202,11 +1202,17 @@ function salvaRapporto() {
   showToast('✅ Rapporto salvato!');
 }
 
+function finalizzaEInvia_NOVA() {
 function finalizzaEInvia() {
   const data = collectFormData();
   if (!data.cantiere) { showToast('⚠️ Inserisci il cantiere'); return; }
 
-  // Salva o relatório
+  // Validação de horários obrigatórios
+  if (!data.tempi?.arrivo || !data.tempi?.fine) {
+    showToast('⚠️ Inserisci orario di arrivo e fine lavoro');
+    return;
+  }
+
   const idx = rapportiDB.findIndex(r => r.data === data.data && r.dipendente === data.dipendente);
   if (idx >= 0) rapportiDB[idx] = data;
   else rapportiDB.push(data);
@@ -1219,36 +1225,30 @@ function finalizzaEInvia() {
   const toKey = d => d.toISOString().split('T')[0];
 
   // ── ENVIO SEMANAL ──────────────────────────────────────────
-  // Calcula a semana anterior à data do relatório
-  const diaSemana = hoje.getDay(); // 0=dom, 1=seg...
-  // Início da semana atual (segunda)
+  const diaSemana = hoje.getDay();
   const inicioSemAtual = new Date(hoje);
   inicioSemAtual.setDate(hoje.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
-  // Semana anterior
   const fimSemAnt = new Date(inicioSemAtual);
   fimSemAnt.setDate(inicioSemAtual.getDate() - 1);
   const inicioSemAnt = new Date(fimSemAnt);
   inicioSemAnt.setDate(fimSemAnt.getDate() - 6);
 
   const chaveSem = `xsc_sem_${data.dipendente}_${toKey(inicioSemAnt)}`;
+  let temSemanal = false;
   if (!storage.getItem(chaveSem)) {
     const itemsSem = rapportiDB.filter(r =>
       r.dipendente === data.dipendente &&
       r.data >= toKey(inicioSemAnt) &&
       r.data <= toKey(fimSemAnt)
     );
+    storage.setItem(chaveSem, '1');
     if (itemsSem.length > 0) {
-      storage.setItem(chaveSem, '1');
-      setTimeout(() => {
-        inviaEmailSettimanale(itemsSem, inicioSemAnt, fimSemAnt);
-      }, 800);
-    } else {
-      storage.setItem(chaveSem, '1'); // marca como enviado mesmo sem relatórios
+      temSemanal = true;
+      setTimeout(() => inviaEmailSettimanale(itemsSem, inicioSemAnt, fimSemAnt), 800);
     }
   }
 
   // ── ENVIO MENSAL ───────────────────────────────────────────
-  // Mês anterior ao mês do relatório
   const mesPrevNum = hoje.getMonth() === 0 ? 11 : hoje.getMonth() - 1;
   const anoPrev = hoje.getMonth() === 0 ? hoje.getFullYear() - 1 : hoje.getFullYear();
   const prefixMesAnt = `${anoPrev}-${String(mesPrevNum + 1).padStart(2,'0')}`;
@@ -1258,15 +1258,13 @@ function finalizzaEInvia() {
     const itemsMes = rapportiDB.filter(r =>
       r.dipendente === data.dipendente && r.data.startsWith(prefixMesAnt)
     );
+    storage.setItem(chaveMes, '1');
     if (itemsMes.length > 0) {
-      storage.setItem(chaveMes, '1');
-      setTimeout(() => {
-        inviaEmailMensale(itemsMes, mesPrevNum, anoPrev);
-      }, itemsSem && itemsSem.length > 0 ? 2500 : 800);
-    } else {
-      storage.setItem(chaveMes, '1');
+      const delay = temSemanal ? 3000 : 800;
+      setTimeout(() => inviaEmailMensale(itemsMes, mesPrevNum, anoPrev), delay);
     }
   }
+}
 }
 
 function inviaEmail(data) {
@@ -1321,7 +1319,7 @@ function inviaEmailSettimanale(items, inicioSem, fimSem) {
 
   const corpo = sorted.map(r => {
     const d = new Date(r.data + 'T12:00:00');
-    const azienda = (r.personaleAzienda||[]).join(', ') || '—';
+    const azienda = (r.personaleAzienda||[]).map(p => p.nome||p).filter(Boolean).join(', ') || '—';
     const esterno = (r.personaleEsterno||[]).map(p=>p.nome||p).filter(Boolean).join(', ') || '—';
     const matC = (r.materialiConsumo||[]).map(m=>`${m.desc}${m.qta?' ('+m.qta+')':''}`).join(', ') || '—';
     const matO = (r.materialiOrdinare||[]).map(m=>`${m.desc}${m.qta?' ('+m.qta+')':''}`).join(', ') || '—';
